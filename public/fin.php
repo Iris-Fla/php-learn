@@ -2,32 +2,21 @@
 
 declare(strict_types=1);
 
-use Twig\Loader\FilesystemLoader;
-use Twig\Environment;
+require_once __DIR__ . "/../app/initialize.php";
 
-// セッション開始
-ob_start();
-session_start();
-
-// email送信用に、テンプレートエンジンを使う
-require_once __DIR__ . '/../vendor/autoload.php';
-$loader = new FilesystemLoader(__DIR__ . '/../views');
-$twig = new Environment($loader);
-
-// タイムゾーン
-date_default_timezone_set('Asia/Tokyo');
+use App\DbConnection;
 
 // 入力を受け取る
-// [TODO] POSTからname/email/quantityを受け取る
-// [TODO] 受け取ったデータは、$input 変数に連想配列の形で格納する
 $input = [
-    'purchaser_name' => $_POST['purchaser_name'] ?? '',
-    'email' => $_POST['email'] ?? '',
-    'quantity' => $_POST['quantity'] ?? '',
+    "purchaser_name" => $_POST["purchaser_name"] ?? "",
+    "email" => $_POST["email"] ?? "",
+    "quantity" => $_POST["quantity"] ?? "",
 ];
-
-
-
+// //
+// $params = ["purchaser_name", "email", "quantity"];
+// foreach ($params as $p) {
+//     $input[$p] = $_POST[$p] ?? "";
+// }
 
 /* validate */
 $errord = [];
@@ -37,19 +26,19 @@ if ($input['purchaser_name'] === '') {
 }
 
 // メアドの確認
-// [TODO] emailが「空でないこと」「emailのフォーマットとして適切であること」の確認
-if ($input['email'] === '') {
-    $errord['email'] = 'メールアドレスを入力してください';
-} elseif (!filter_var($input['email'], FILTER_VALIDATE_EMAIL)) {
-    $errord['email'] = 'メールアドレスの形式が不正です';
+if ($input["email"] === "") {
+    $errord['email'] = 'メアドを入力してください';
+} elseif (false === filter_var($input["email"], FILTER_VALIDATE_EMAIL)) {
+    $errord['email'] = 'メアドのフォーマットがおかしいです';
 }
 
 // チケットの枚数
-// [TODO] quantityが「空でないこと」「整数であること」の確認
-if ($input['quantity'] === '') {
-    $errord['quantity'] = '枚数を入力してください';
-} elseif (!preg_match('/^[1-9][0-9]*$/', $input['quantity'])) {
-    $errord['quantity'] = '枚数は1以上の整数で入力してください';
+if ($input["quantity"] === "") {
+    $errord['quantity'] = 'チケット枚数を入力してください';
+} elseif (false === filter_var($input["quantity"], FILTER_VALIDATE_INT)) {
+    $errord['quantity'] = 'チケット枚数のフォーマットがおかしいです';
+} elseif (0 >= filter_var($input["quantity"], FILTER_VALIDATE_INT)) {
+    $errord['quantity'] = 'チケット枚数は正の値で入力してください';
 }
 
 // エラーがあった場合、入力フォームに戻す
@@ -63,25 +52,12 @@ if (count($errord) > 0) {
 }
 
 // tokenの作成
-// [TODO] 「推測不能文字列」として適切なtokenを生成し、$token 変数に格納する
-$token = bin2hex(random_bytes(32));
+$token = bin2hex(random_bytes(16));
 
 /* DBへの登録 */
-// DBハンドルの秀徳
-$config = require __DIR__ . '/../config.php';
-$db_config = $config['db'];
-$dsn = "mysql:dbname={$db_config['database']};host={$db_config['host']};port={$db_config['port']};charset={$db_config['charset']}";
-
-$opt = [
-    // セキュリティ上必須
-    PDO::ATTR_EMULATE_PREPARES => false,  // エミュレート無効
-    PDO::MYSQL_ATTR_MULTI_STATEMENTS => false,  // 複文無効
-    // お好みで
-    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, // データ取得モード
-    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, // エラーが発生した場合、PDOException をスロー
-];
+// DBハンドルの取得
 try {
-    $dbh = new \PDO($dsn, $db_config['user'], $db_config['pass'], $opt);
+    $dbh = DbConnection::get();
 } catch (\PDOException $e) {
     // XXX 暫定: 本来はlogに出力する & エラーページを出力する
     echo $e->getMessage();
@@ -90,17 +66,25 @@ try {
 
 try {
     // データの登録
-    // [TODO] ticket_purchases テーブルに登録する
-    $dbh = new \PDO($dsn, $db_config['user'], $db_config['pass'], $opt);
-    $stmt = $dbh->prepare('INSERT INTO ticket_purchases (purchaser_name, email, quantity, token, created_at, updated_at) VALUES (:purchaser_name, :email, :quantity, :token, :created_at, :updated_at)');
-    $stmt->bindValue(':purchaser_name', $input['purchaser_name'], PDO::PARAM_STR);
-    $stmt->bindValue(':email', $input['email'], PDO::PARAM_STR);
-    $stmt->bindValue(':quantity', (int) $input['quantity'], PDO::PARAM_INT);
-    $stmt->bindValue(':token', $token, PDO::PARAM_STR);
+    // プリペアードステートメントを作る
+    $sql = 'INSERT INTO ticket_purchases(email, purchaser_name, quantity, token, created_at, updated_at)
+      VALUES(:email, :purchaser_name, :quantity, :token, :created_at, :updated_at);';
+    $pre = $dbh->prepare($sql);
+    // プレースホルダーに値をバインド
+    $now = date("Y-m-d H:i:s");
+    $pre->bindValue(':email', $input['email'], PDO::PARAM_STR);
+    $pre->bindValue(':purchaser_name', $input['purchaser_name'], PDO::PARAM_STR);
+    $pre->bindValue(':quantity', $input['quantity'], PDO::PARAM_INT);
+    $pre->bindValue(':token', $token, PDO::PARAM_STR);
+    $pre->bindValue(':created_at', $now, PDO::PARAM_STR);
+    $pre->bindValue(':updated_at', $now, PDO::PARAM_STR);
+    // 実行
+    $pre->execute();
+    // 次の処理用にid把握しておく
+    $ticket_purchase_id = (int)$dbh->lastInsertId();
+
     // mailの送信
     $send_at = (new DateTimeImmutable())->format('Y-m-d H:i:s');
-    $stmt->bindValue(':updated_at', $send_at, PDO::PARAM_STR);
-    $stmt->bindValue(':created_at', $send_at, PDO::PARAM_STR);
     $base_url = 'http://game.m-fr.net:8080/';
     $subject = '【チケット購入完了】チケット購入ありがとうございます';
     $body = $twig->render('ticket_purchase_complete.twig', [
@@ -112,20 +96,22 @@ try {
     // XXX 本当はここでmail送信をする
 
     // XXX 今回は実際のmail送信は書かないので「mailを送った履歴」DBへのinsertのみ
-    // [TODO] email_send_logs テーブルに登録する
-    $stmt = $dbh->prepare('INSERT INTO email_send_logs (updated_at,created_at,email,quantity,ticket_purchase_id,purchaser_name,subject,body,sent_at) VALUES (:updated_at,:created_at,:email, :quantity, :ticket_purchase_id, :purchaser_name, :subject, :body, :sent_at)');
-    $stmt->bindValue(':updated_at', $send_at, PDO::PARAM_STR);
-    $stmt->bindValue(':created_at', $send_at, PDO::PARAM_STR);
-    $stmt->bindValue(':email', $input['email'], PDO::PARAM_STR);
-    $stmt->bindValue(':quantity', (int) $input['quantity'], PDO::PARAM_INT);
-    $stmt->bindValue(':ticket_purchase_id', $dbh->lastInsertId(), PDO::PARAM_INT);
-    $stmt->bindValue(':purchaser_name', $input['purchaser_name'], PDO::PARAM_STR);
-    $stmt->bindValue(':subject', $subject, PDO::PARAM_STR);
-    $stmt->bindValue(':body', $body, PDO::PARAM_STR);
-    $stmt->bindValue(':sent_at', $send_at, PDO::PARAM_STR);
-    $stmt->execute();
-
-
+    $sql = 'INSERT INTO email_send_logs(ticket_purchase_id, email, purchaser_name, quantity, subject, body, sent_at, created_at, updated_at)
+            VALUES (:ticket_purchase_id, :email, :purchaser_name, :quantity, :subject, :body, :sent_at, :created_at, :updated_at);';
+    $pre = $dbh->prepare($sql);
+    // 値をバインド
+    $now = date("Y-m-d H:i:s");
+    $pre->bindValue(':ticket_purchase_id', (int)$ticket_purchase_id, PDO::PARAM_INT);
+    $pre->bindValue(':email', $input['email'], PDO::PARAM_STR);
+    $pre->bindValue(':purchaser_name', $input['purchaser_name'], PDO::PARAM_STR);
+    $pre->bindValue(':quantity', $input['quantity'], PDO::PARAM_INT);
+    $pre->bindValue(':subject', $subject, PDO::PARAM_STR);
+    $pre->bindValue(':body', $body, PDO::PARAM_STR);
+    $pre->bindValue(':sent_at', $send_at, PDO::PARAM_STR);
+    $pre->bindValue(':created_at', $now, PDO::PARAM_STR);
+    $pre->bindValue(':updated_at', $now, PDO::PARAM_STR);
+    // 実行
+    $pre->execute();
 } catch (Exception $e) {
     // XXX 暫定: 本来はlogに出力する & エラーページを出力する
     echo $e->getMessage();

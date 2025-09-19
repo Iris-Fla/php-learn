@@ -2,9 +2,7 @@
 
 declare(strict_types=1);
 
-// セッション開始
-ob_start();
-session_start();
+require_once __DIR__ . "/../../app/initialize.php";
 
 // ログイン情報
 const LOGIN_ID = 'admin';
