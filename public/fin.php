@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . "/../app/initialize.php";
 
+use App\Config;
 use App\DbConnection;
+use App\Domain\Validate\EmailValidatorSimple;
+use App\Models\TicketPurchase;
 
 // 入力を受け取る
 $input = [
@@ -28,17 +31,33 @@ if ($input['purchaser_name'] === '') {
 // メアドの確認
 if ($input["email"] === "") {
     $errord['email'] = 'メアドを入力してください';
-} elseif (false === filter_var($input["email"], FILTER_VALIDATE_EMAIL)) {
-    $errord['email'] = 'メアドのフォーマットがおかしいです';
+} else {
+    $email = $event_policy->emailValidate($input['email']);
+    $allow_duplicate_email = Config::get('event')['allow_duplicate_email'] ?? false;
+    if ( false === $email) {
+        $errord['email'] = 'メアドのフォーマットがおかしいです';
+    } elseif (false === $allow_duplicate_email) {
+        $ticket = TicketPurchase::getByEmail($email);
+        if (false !== $ticket) {
+            $errord['email'] = '同じメアドでの複数回の購入はできません';
+        }
+    }
 }
+
+
 
 // チケットの枚数
 if ($input["quantity"] === "") {
     $errord['quantity'] = 'チケット枚数を入力してください';
-} elseif (false === filter_var($input["quantity"], FILTER_VALIDATE_INT)) {
-    $errord['quantity'] = 'チケット枚数のフォーマットがおかしいです';
-} elseif (0 >= filter_var($input["quantity"], FILTER_VALIDATE_INT)) {
-    $errord['quantity'] = 'チケット枚数は正の値で入力してください';
+} else {
+    $quantity = filter_var($input["quantity"], FILTER_VALIDATE_INT);
+    if ($quantity === false) {
+        $errord['quantity'] = 'チケット枚数のフォーマットがおかしいです';
+    } elseif (0 >= $quantity) {
+        $errord['quantity'] = 'チケット枚数は正の値で入力してください';
+    } elseif (false === $event_policy->canReserveQuantity($quantity)) {
+        $errord['quantity'] = "チケット枚数は{XXXX}枚以内でお願いします";
+    }
 }
 
 // エラーがあった場合、入力フォームに戻す
@@ -81,11 +100,11 @@ try {
     // 実行
     $pre->execute();
     // 次の処理用にid把握しておく
-    $ticket_purchase_id = (int)$dbh->lastInsertId();
+    $ticket_purchase_id = (int) $dbh->lastInsertId();
 
     // mailの送信
     $send_at = (new DateTimeImmutable())->format('Y-m-d H:i:s');
-    $base_url = 'http://game.m-fr.net:8080/';
+    $base_url = 'http://game.m-fr.net:8007/';
     $subject = '【チケット購入完了】チケット購入ありがとうございます';
     $body = $twig->render('ticket_purchase_complete.twig', [
         'purchaser_name' => $input['purchaser_name'],
@@ -101,7 +120,7 @@ try {
     $pre = $dbh->prepare($sql);
     // 値をバインド
     $now = date("Y-m-d H:i:s");
-    $pre->bindValue(':ticket_purchase_id', (int)$ticket_purchase_id, PDO::PARAM_INT);
+    $pre->bindValue(':ticket_purchase_id', (int) $ticket_purchase_id, PDO::PARAM_INT);
     $pre->bindValue(':email', $input['email'], PDO::PARAM_STR);
     $pre->bindValue(':purchaser_name', $input['purchaser_name'], PDO::PARAM_STR);
     $pre->bindValue(':quantity', $input['quantity'], PDO::PARAM_INT);

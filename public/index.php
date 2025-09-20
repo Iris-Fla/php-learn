@@ -14,4 +14,5 @@ unset($_SESSION['input'], $_SESSION['errord']);
 echo $twig->render('index.twig', [
     'input' => $input,
     'errord' => $errord,
+    'title' => $event_policy->eventTitle(),
 ]);

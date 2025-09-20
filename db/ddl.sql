@@ -29,3 +29,11 @@ CREATE TABLE `email_send_logs` (
   KEY `idx_email_logs_email` (`email`),
   KEY `idx_email_logs_sent_at` (`sent_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='メール送信履歴';
+
+-- 
+CREATE TABLE `ticket_token_usages` (
+  `token` varbinary(255) NOT NULL COMMENT '識別用トークン',
+  `created_at` datetime NOT NULL COMMENT '作成日時',
+  `updated_at` datetime NOT NULL COMMENT '更新日時',
+  PRIMARY KEY (`token`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='チケットトークン使用履歴';
